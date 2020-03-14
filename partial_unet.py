@@ -46,7 +46,7 @@ class EncoderBlock(nn.Module):
         img = torch.zeros(batch, self.pconv.in_channels, height, width)
         mask = torch.zeros(batch, self.pconv.in_channels, height, width)
         y = self.forward(img, mask)
-        return y.size(), y.dtype
+        return y.size(), y.dtype, y.device
 
 
 # In[ ]:
@@ -82,6 +82,14 @@ class DecoderBlock(nn.Module):
         return self.pconv.mask_out
         
     def forward(self, in_image, in_mask, skip_img, skip_mask, verbose=False):
+        
+        # make sure all in the same devices
+        if skip_img.device != in_image.device:
+            skip_img = skip_img.to(in_image)
+        if skip_mask.device != in_image.device:
+            skip_mask = skip_mask.to(in_image)
+        if in_mask.device != in_image.device:
+            in_mask = in_mask.to(in_image)
 
         # upsampling
         up_img = self.upsampling_img(in_image)
@@ -90,7 +98,7 @@ class DecoderBlock(nn.Module):
         if verbose:
             print(f"input {in_image.size()} upsampled into {up_img.size()} + skip_img {skip_img.size()}")
             print(f"mask {in_mask.size()} upsampled into {up_mask.size()} + skip_mask {skip_mask.size()}")
-        
+            
         # partial convolution from the concatenated images & masks
         out_image = self.pconv(
             torch.cat([skip_img, up_img], dim=1),
@@ -113,7 +121,7 @@ class DecoderBlock(nn.Module):
         
         z = self.forward(x,y,x_cat,y_cat)
         
-        return z.size(), z.dtype
+        return z.size(), z.dtype, z.device
 
 
 # In[ ]:
@@ -134,7 +142,8 @@ class PartialUNet(nn.Module):
         super(PartialUNet, self).__init__()
         
         self.in_channels = in_channels
-        self.encoders = [
+        
+        self.encoders = nn.ModuleList([
             EncoderBlock(
                 c_in, c_out, kernel_size=(ks, ks), use_batch_norm=bn
             ) for (c_in, c_out, ks, bn) in [
@@ -147,20 +156,22 @@ class PartialUNet(nn.Module):
                 (512, 512, 3, True),
                 (512, 512, 3, True)
             ]
-        ]
+        ])
         
-        self.decoders = [DecoderBlock(
-            c_in, c_out, c_cat, kernel_size=ks, use_batch_norm=bn
-        ) for (c_in, c_out, c_cat, ks, bn) in [
-            (512, 512, 512, 3, True),
-            (512, 512, 512, 3, True),
-            (512, 512, 512, 3, True),
-            (512, 512, 512, 3, True),
-            (512, 256, 256, 3, True),
-            (256, 128, 128, 3, True),
-            (128, 64, 64, 3, True),
-            (64, 3, 3, 3, False)
-        ]]
+        self.decoders = nn.ModuleList([
+            DecoderBlock(
+                c_in, c_out, c_cat, kernel_size=ks, use_batch_norm=bn
+            ) for (c_in, c_out, c_cat, ks, bn) in [
+                (512, 512, 512, 3, True),
+                (512, 512, 512, 3, True),
+                (512, 512, 512, 3, True),
+                (512, 512, 512, 3, True),
+                (512, 256, 256, 3, True),
+                (256, 128, 128, 3, True),
+                (128, 64, 64, 3, True),
+                (64, 3, 3, 3, False)
+            ]
+        ])
         
         # last layer
         self.output_layer = nn.Sequential(
@@ -197,7 +208,6 @@ class PartialUNet(nn.Module):
         )
             
         # last layer
-        self.output_layer.to(in_image)
         out_image = self.output_layer(out_image)
 
         return out_image
@@ -221,4 +231,10 @@ class PartialUNet(nn.Module):
 
 
 # punet.get_output_shape(512, 512)
+
+
+# In[ ]:
+
+
+
 
